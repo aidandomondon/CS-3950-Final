@@ -9,6 +9,7 @@ TRAINSET_DIR = './train';
 TESTSET_DIR = './test';
 BATCH_SIZE = 30;
 MODEL_SAVES_DIR = './saves';
+EPOCHS = 50;
 
 # Load the dataset
 trainset = torchvision.datasets.FashionMNIST(TRAINSET_DIR, train=True, 
@@ -86,17 +87,18 @@ if os.listdir(MODEL_SAVES_DIR) == []:
     loss_function = torch.nn.CrossEntropyLoss();
     optimizer = torch.optim.Adam(net.parameters());
 
-    for i, data in tqdm(enumerate(trainloader)):
-        optimizer.zero_grad();
+    for epoch in range(EPOCHS):
+        for i, data in tqdm(enumerate(trainloader)):
+            optimizer.zero_grad();
 
-        # get predictions
-        inputs, labels = data;
-        logits = net(inputs);
+            # get predictions
+            inputs, labels = data;
+            logits = net(inputs);
 
-        # compute loss, compute gradients, update gradients accordingly
-        loss = loss_function(logits, labels);
-        loss.backward();
-        optimizer.step();
+            # compute loss, compute gradients, update gradients accordingly
+            loss = loss_function(logits, labels);
+            loss.backward();
+            optimizer.step();
 
     # save/load model mechanism to avoid re-running while debugging later parts
     torch.save(net, f'{MODEL_SAVES_DIR}/last_save.pt');
