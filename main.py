@@ -9,7 +9,7 @@ TRAINSET_DIR = './train';
 TESTSET_DIR = './test';
 BATCH_SIZE = 30;
 MODEL_SAVES_DIR = './saves';
-EPOCHS = 50;
+EPOCHS = 80;
 
 # Load the dataset
 trainset = torchvision.datasets.FashionMNIST(TRAINSET_DIR, train=True, 
