@@ -3,6 +3,7 @@ import torch.utils.data.dataloader
 import torch.nn;
 from tqdm import tqdm;
 import os;
+import numpy as np;
 
 # Configurations
 TRAINSET_DIR = './train';
@@ -118,4 +119,30 @@ for i, data in tqdm(enumerate(testloader)):
     correct += num_correct;
     incorrect += BATCH_SIZE - num_correct;
 
-print(f'Accuracy: {correct / (correct + incorrect)}')
+print(f'Accuracy: {correct / (correct + incorrect)}');
+
+###########################################
+# Calculating sensitivity
+###########################################
+
+# Considering only the first layer for now
+
+# Compute sensitivities
+kernels = net.conv1.weight;
+sensitivities = torch.zeros_like(kernels);  # sensitivity scores
+for k in range(kernels.shape[0]):
+    kernel = torch.stack([kernels[k]]);
+    # for one batch of the data,
+    for i, data in enumerate(trainloader):
+        images = data[0];
+        old_featmaps = torch.nn.functional.conv2d(images, kernel);  
+        for i, j in np.ndindex(kernel.shape[2:]):
+            new = kernel.detach().clone();
+            new[0, 0, i, j] = 0;
+            new_featmaps = torch.nn.functional.conv2d(images, new);
+            sensitivities[k, 0, i, j] = sensitivities[k, 0, i, j] \
+                + torch.linalg.matrix_norm(old_featmaps - new_featmaps, dim=(2, 3)).sum().item();
+            
+
+
+        
