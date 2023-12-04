@@ -4,6 +4,7 @@ import torch.nn;
 from tqdm import tqdm;
 import os;
 import numpy as np;
+import copy;
 
 # Configurations
 TRAINSET_DIR = './train';
@@ -130,6 +131,7 @@ print(f'Accuracy: {correct / (correct + incorrect)}');
 # Compute sensitivities
 kernels = net.conv1.weight;
 sensitivities = torch.zeros_like(kernels);  # sensitivity scores
+print('Computing sensitivites...')
 for k in range(kernels.shape[0]):
     kernel = torch.stack([kernels[k]]);
     # for one batch of the data,
@@ -142,7 +144,35 @@ for k in range(kernels.shape[0]):
             new_featmaps = torch.nn.functional.conv2d(images, new);
             sensitivities[k, 0, i, j] = sensitivities[k, 0, i, j] \
                 + torch.linalg.matrix_norm(old_featmaps - new_featmaps, dim=(2, 3)).sum().item();
-            
 
+# Sort sensitivites
+sensitivities_as_list = []
+for k in range(kernels.shape[0]):
+    for i, j in np.ndindex(kernel.shape[2:]):
+        sensitivities_as_list.append((k, i, j, sensitivities[k, 0, i, j]));
+sorted_sensitivities = sorted(sensitivities_as_list, key=lambda item : item[3]);
 
-        
+# Prune bottom 10% of sensitivities
+pruning_mass = torch.numel(kernels) // 10
+pruned = kernels.detach().clone();
+for idx in range(pruning_mass):
+    weight = sorted_sensitivities[idx];
+    pruned[weight[0], 0, weight[1], weight[2]] = 0;
+pruned_net = copy.deepcopy(net);
+pruned_net.conv1.weight = torch.nn.Parameter(pruned, requires_grad=False);
+
+# Evaluating pruned model's performance on test data
+pruned_net.train(mode = False);
+new_correct = 0;
+new_incorrect = 0;
+print('Evaluating new performance...')
+for i, data in tqdm(enumerate(testloader)):
+    inputs, labels = data;
+    logits = pruned_net(inputs);
+    predictions = torch.argmax(logits, 1);
+    comparisons = torch.eq(predictions, labels);
+    num_correct = comparisons.long().count_nonzero();
+    new_correct += num_correct;
+    new_incorrect += BATCH_SIZE - num_correct;
+
+print(f'Accuracy: {new_correct / (new_correct + new_incorrect)}');
