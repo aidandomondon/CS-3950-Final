@@ -80,13 +80,13 @@ class Net(torch.nn.Module):
         X = self.linear4Clip(X);
         return X;
 
-loss_function = torch.nn.CrossEntropyLoss();
 
 if os.listdir(MODEL_SAVES_DIR) == []:
 
     net = Net();
     net.train();
 
+    loss_function = torch.nn.CrossEntropyLoss();
     optimizer = torch.optim.Adam(net.parameters());
 
     for epoch in range(EPOCHS):
@@ -107,59 +107,72 @@ if os.listdir(MODEL_SAVES_DIR) == []:
 else:
     net = torch.load(f'{MODEL_SAVES_DIR}/last_save.pt');
 
-# # Evaluating the model's performance on test data
-# net.train(mode = False);
-# correct = 0;
-# incorrect = 0;
-# for i, data in tqdm(enumerate(testloader)):
-#     inputs, labels = data;
-#     logits = net(inputs);
-#     predictions = torch.argmax(logits, 1);
-#     comparisons = torch.eq(predictions, labels);
-#     num_correct = comparisons.long().count_nonzero();
-#     correct += num_correct;
-#     incorrect += BATCH_SIZE - num_correct;
+# Evaluating the model's performance on test data
+net.train(mode = False);
+correct = 0;
+incorrect = 0;
+for i, data in tqdm(enumerate(testloader)):
+    inputs, labels = data;
+    logits = net(inputs);
+    predictions = torch.argmax(logits, 1);
+    comparisons = torch.eq(predictions, labels);
+    num_correct = comparisons.long().count_nonzero();
+    correct += num_correct;
+    incorrect += BATCH_SIZE - num_correct;
 
-# print(f'Accuracy: {correct / (correct + incorrect)}');
+print(f'Accuracy: {correct / (correct + incorrect)}');
 
 ###########################################
-# Calculating EGF
+# Calculating sensitivity
 ###########################################
 
 # Considering only the first layer for now
 
-# Compute g_1
-print('Computing g_1...')
-loss = 0;
-optimizer = torch.optim.Adam(net.parameters());
-for i, data in tqdm(enumerate(trainloader)):
+# Compute sensitivities
+kernels = net.conv1.weight;
+sensitivities = torch.zeros_like(kernels);  # sensitivity scores
+print('Computing sensitivites...')
+for k in range(kernels.shape[0]):
+    kernel = torch.stack([kernels[k]]);
+    # for one batch of the data,
+    for i, data in enumerate(trainloader):
+        images = data[0];
+        old_featmaps = torch.nn.functional.conv2d(images, kernel);  
+        for i, j in np.ndindex(kernel.shape[2:]):
+            new = kernel.detach().clone();
+            new[0, 0, i, j] = 0;
+            new_featmaps = torch.nn.functional.conv2d(images, new);
+            sensitivities[k, 0, i, j] = sensitivities[k, 0, i, j] \
+                + torch.linalg.matrix_norm(old_featmaps - new_featmaps, dim=(2, 3)).sum().item();
 
-    optimizer.zero_grad();
+# Sort sensitivites
+sensitivities_as_list = []
+for k in range(kernels.shape[0]):
+    for i, j in np.ndindex(kernel.shape[2:]):
+        sensitivities_as_list.append((k, i, j, sensitivities[k, 0, i, j]));
+sorted_sensitivities = sorted(sensitivities_as_list, key=lambda item : item[3]);
 
-    # get predictions
+# Prune bottom 10% of sensitivities
+pruning_mass = torch.numel(kernels) // 10
+pruned = kernels.detach().clone();
+for idx in range(pruning_mass):
+    weight = sorted_sensitivities[idx];
+    pruned[weight[0], 0, weight[1], weight[2]] = 0;
+pruned_net = copy.deepcopy(net);
+pruned_net.conv1.weight = torch.nn.Parameter(pruned, requires_grad=False);
+
+# Evaluating pruned model's performance on test data
+pruned_net.train(mode = False);
+new_correct = 0;
+new_incorrect = 0;
+print('Evaluating new performance...')
+for i, data in tqdm(enumerate(testloader)):
     inputs, labels = data;
-    logits = net(inputs);
+    logits = pruned_net(inputs);
+    predictions = torch.argmax(logits, 1);
+    comparisons = torch.eq(predictions, labels);
+    num_correct = comparisons.long().count_nonzero();
+    new_correct += num_correct;
+    new_incorrect += BATCH_SIZE - num_correct;
 
-    # compute loss, compute gradients, update gradients accordingly
-    loss += loss_function(logits, labels);
-
-loss.backward();
-theta_1 = net.conv1.weight;
-print('a')
-# b = [net._modules[f] for f in filter(lambda x : re.search("^conv", x), net._modules.keys())]
-
-# # Evaluating pruned model's performance on test data
-# pruned_net.train(mode = False);
-# new_correct = 0;
-# new_incorrect = 0;
-# print('Evaluating new performance...')
-# for i, data in tqdm(enumerate(testloader)):
-#     inputs, labels = data;
-#     logits = pruned_net(inputs);
-#     predictions = torch.argmax(logits, 1);
-#     comparisons = torch.eq(predictions, labels);
-#     num_correct = comparisons.long().count_nonzero();
-#     new_correct += num_correct;
-#     new_incorrect += BATCH_SIZE - num_correct;
-
-# print(f'Accuracy: {new_correct / (new_correct + new_incorrect)}');
+print(f'Accuracy: {new_correct / (new_correct + new_incorrect)}');
